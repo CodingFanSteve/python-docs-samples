@@ -18,12 +18,15 @@ URLS on App Engine
 """
 
 import logging
+import os
 import urllib
+import json
 
 # [START urllib2-imports]
 import urllib2
 # [END urllib2-imports]
 
+from google.appengine.api import app_identity
 # [START urlfetch-imports]
 from google.appengine.api import urlfetch
 # [END urlfetch-imports]
@@ -48,6 +51,7 @@ class UrlFetchHandler(webapp2.RequestHandler):
     """ Demonstrates an HTTP query using urlfetch"""
 
     def get(self):
+
         # [START urlfetch-get]
         url = 'http://www.google.com/humans.txt'
         try:
@@ -84,6 +88,47 @@ class UrlPostHandler(webapp2.RequestHandler):
             logging.exception('Caught exception fetching url')
         # [END urlfetch-post]
 
+class GcsObjectList(webapp2.RequestHandler):
+    def get(self):
+        bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+        url = 'https://www.googleapis.com/storage/v1/b/{0}/o'.format(bucket_name)
+        headers = {'authorization': 'Bearer ...'} # Redacted access token
+        result = urlfetch.fetch(
+            url=url,
+            headers=headers)
+        self.response.write(result.content)
+
+class GcsObjectInsert(webapp2.RequestHandler):
+    def get(self):
+        bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+        url = 'https://storage.googleapis.com/upload/storage/v1/b/{0}/o?uploadType=multipart'.format(bucket_name)
+        headers = {
+            'authorization': 'Bearer ...', # Redacted access token
+            'Content-Type': 'multipart/related; boundary=foo_bar_baz',
+            'Content-Length': '655360'
+        }
+        upload_content = 'yeah' * 1024 * 64
+        payload = '''--foo_bar_baz
+Content-Type: application/json
+MIME-Version: 1.0
+
+{{"metadata": {{"foo": "bar"}}, "name": "yao-test-gcs"}}
+--foo_bar_baz
+Content-Type: text/plain
+MIME-Version: 1.0
+Content-Transfer-Encoding: binary
+
+{0}
+
+--foo_bar_baz--
+'''.format(upload_content)
+        result = urlfetch.fetch(
+            url=url,
+            payload=payload,
+            method=urlfetch.POST,
+            headers=headers)
+        self.response.write(result.content)            
+
 
 class SubmitHandler(webapp2.RequestHandler):
     """ Handler that receives UrlPostHandler POST request"""
@@ -96,5 +141,7 @@ app = webapp2.WSGIApplication([
     ('/', UrlLibFetchHandler),
     ('/url_fetch', UrlFetchHandler),
     ('/url_post', UrlPostHandler),
-    ('/submit_form', SubmitHandler)
+    ('/submit_form', SubmitHandler),
+    ('/gcs_get_object', GcsObjectList),
+    ('/gcs_insert_object', GcsObjectInsert)
 ], debug=True)
