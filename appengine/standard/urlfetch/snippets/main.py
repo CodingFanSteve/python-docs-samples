@@ -25,6 +25,7 @@ import json
 # [START urllib2-imports]
 import urllib2
 # [END urllib2-imports]
+import httplib2
 
 from google.appengine.api import app_identity
 # [START urlfetch-imports]
@@ -101,13 +102,13 @@ class GcsObjectList(webapp2.RequestHandler):
 class GcsObjectInsert(webapp2.RequestHandler):
     def get(self):
         bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
-        url = 'https://storage.googleapis.com/upload/storage/v1/b/{0}/o?uploadType=multipart'.format(bucket_name)
+        url = 'https://storage.googleapis.com/upload/storage/v1/b/{0}/o?uploadType=multipart&alt=json'.format(bucket_name)
         headers = {
             'authorization': 'Bearer ...', # Redacted access token
             'Content-Type': 'multipart/related; boundary=foo_bar_baz',
-            'Content-Length': '655360'
+            # 'Content-Length': '655360'
         }
-        upload_content = 'yeah' * 1024 * 64
+        upload_content = 'yaoliu1  ' * 1024 * 64
         payload = '''--foo_bar_baz
 Content-Type: application/json
 MIME-Version: 1.0
@@ -127,7 +128,51 @@ Content-Transfer-Encoding: binary
             payload=payload,
             method=urlfetch.POST,
             headers=headers)
-        self.response.write(result.content)            
+        self.response.write(result.content)    
+
+class GcsObjectListHttp(webapp2.RequestHandler):
+    def get(self):
+        http = httplib2.Http()
+        bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+        url = 'https://www.googleapis.com/storage/v1/b/{0}/o'.format(bucket_name)
+        headers = {'authorization': 'Bearer ...'} # Redacted access token
+        (resp, content) = http.request(
+            uri=url,
+            method="GET",
+            headers=headers)
+        self.response.write(content)
+
+class GcsObjectInsertHttp(webapp2.RequestHandler):
+    def get(self):
+        http = httplib2.Http()
+        bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+        url = 'https://storage.googleapis.com/upload/storage/v1/b/{0}/o?uploadType=multipart&alt=json'.format(bucket_name)
+        headers = {
+            'authorization': 'Bearer ...', # Redacted access token
+            'Content-Type': 'multipart/related; boundary=foo_bar_baz',
+            # 'Content-Length': '655360'
+        }
+        upload_content = 'yaoliu1  ' * 1024 * 64
+        payload = '''--foo_bar_baz
+Content-Type: application/json
+MIME-Version: 1.0
+
+{{"metadata": {{"foo": "bar"}}, "name": "yao-test-gcs"}}
+--foo_bar_baz
+Content-Type: text/plain
+MIME-Version: 1.0
+Content-Transfer-Encoding: binary
+
+{0}
+
+--foo_bar_baz--
+'''.format(upload_content)
+        (resp, content) = http.request(
+            uri=url,
+            method="POST",
+            body=payload,
+            headers=headers)
+        self.response.write(content)                
 
 
 class SubmitHandler(webapp2.RequestHandler):
@@ -142,6 +187,8 @@ app = webapp2.WSGIApplication([
     ('/url_fetch', UrlFetchHandler),
     ('/url_post', UrlPostHandler),
     ('/submit_form', SubmitHandler),
-    ('/gcs_get_object', GcsObjectList),
-    ('/gcs_insert_object', GcsObjectInsert)
+    ('/gcs_list_object', GcsObjectList),
+    ('/gcs_insert_object', GcsObjectInsert),
+    ('/gcs_list_object_http', GcsObjectListHttp),
+    ('/gcs_insert_object_http', GcsObjectInsertHttp)
 ], debug=True)
