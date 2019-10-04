@@ -31,7 +31,26 @@ from google.appengine.api import app_identity
 # [START urlfetch-imports]
 from google.appengine.api import urlfetch
 # [END urlfetch-imports]
+from oauth2client import service_account
+from apiclient.discovery import build as discovery_build
+from apiclient.http import MediaFileUpload
+from apiclient.errors import HttpError
+
 import webapp2
+
+
+def GetAuthorizedHttpForGcsApi():
+    # Acquire credentials from service account key file 
+    service_account_keyfile = './appenginedefault-yaoliu.json'
+    scopes = (
+        'https://www.googleapis.com/auth/cloud-platform', 
+        'https://www.googleapis.com/auth/devstorage.read_write',
+    )
+    creds = service_account.ServiceAccountCredentials.from_json_keyfile_name(
+        service_account_keyfile,
+        scopes)    
+    
+    return creds.authorize(httplib2.Http())    
 
 
 class UrlLibFetchHandler(webapp2.RequestHandler):
@@ -89,7 +108,7 @@ class UrlPostHandler(webapp2.RequestHandler):
             logging.exception('Caught exception fetching url')
         # [END urlfetch-post]
 
-class GcsObjectList(webapp2.RequestHandler):
+class GcsObjectListUrlFetch(webapp2.RequestHandler):
     def get(self):
         bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
         url = 'https://www.googleapis.com/storage/v1/b/{0}/o'.format(bucket_name)
@@ -99,7 +118,7 @@ class GcsObjectList(webapp2.RequestHandler):
             headers=headers)
         self.response.write(result.content)
 
-class GcsObjectInsert(webapp2.RequestHandler):
+class GcsObjectInsertUrlFetch(webapp2.RequestHandler):
     def get(self):
         bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
         url = 'https://storage.googleapis.com/upload/storage/v1/b/{0}/o?uploadType=multipart&alt=json'.format(bucket_name)
@@ -130,29 +149,26 @@ Content-Transfer-Encoding: binary
             headers=headers)
         self.response.write(result.content)    
 
-class GcsObjectListHttp(webapp2.RequestHandler):
+class GcsObjectListHttplib2(webapp2.RequestHandler):
     def get(self):
-        http = httplib2.Http()
+        http = GetAuthorizedHttpForGcsApi()
         bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
         url = 'https://www.googleapis.com/storage/v1/b/{0}/o'.format(bucket_name)
-        headers = {'authorization': 'Bearer ...'} # Redacted access token
         (resp, content) = http.request(
             uri=url,
-            method="GET",
-            headers=headers)
+            method="GET")
         self.response.write(content)
 
-class GcsObjectInsertHttp(webapp2.RequestHandler):
+class GcsObjectInsertHttplib2(webapp2.RequestHandler):
     def get(self):
-        http = httplib2.Http()
+        http = GetAuthorizedHttpForGcsApi()
         bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
         url = 'https://storage.googleapis.com/upload/storage/v1/b/{0}/o?uploadType=multipart&alt=json'.format(bucket_name)
         headers = {
-            'authorization': 'Bearer ...', # Redacted access token
             'Content-Type': 'multipart/related; boundary=foo_bar_baz',
             # 'Content-Length': '655360'
         }
-        upload_content = 'yaoliu1  ' * 1024 * 64
+        upload_content = 'yaoliu2  ' * 1024 * 64
         payload = '''--foo_bar_baz
 Content-Type: application/json
 MIME-Version: 1.0
@@ -172,12 +188,51 @@ Content-Transfer-Encoding: binary
             method="POST",
             body=payload,
             headers=headers)
-        self.response.write(content)                
+        self.response.write(content)
+
+
+class GcsObjectInsertApiClient(webapp2.RequestHandler):
+    def get(self):
+        http = GetAuthorizedHttpForGcsApi()
+        service = discovery_build('storage', 'v1', http=http)
+
+        print 'Building upload request...'
+        file_to_upload = './yao-test-gcs.txt'
+        media = MediaFileUpload(file_to_upload, resumable=True)
+        if not media.mimetype():
+            media = MediaFileUpload(filename, 'text/plain', resumable=True)        
+        bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+        object_name = 'yao-test-gcs'
+        request = service.objects().insert(bucket=bucket_name, name=object_name, media_body=media)
+        
+        print 'Uploading file: %s to bucket: %s object: %s ' % (file_to_upload, bucket_name, object_name)
+        RETRYABLE_ERRORS = (httplib2.HttpLib2Error, IOError)
+
+
+        response = None
+        counter = 1
+        while response is None:
+            error = None
+            try:
+                print ('Upload round ', counter)
+                progress, response = request.next_chunk()
+                if progress:
+                    print('Upload %d%%' % (100 * progress.progress()))
+                counter += 1
+            except HttpError, err:
+                error = err
+                if err.resp.status < 500:
+                    raise
+            except RETRYABLE_ERRORS, err:
+                error = err
+
+
+        print '\nUpload complete!'
+        print self.response.write(json.dumps(response, indent=2))           
 
 
 class SubmitHandler(webapp2.RequestHandler):
     """ Handler that receives UrlPostHandler POST request"""
-
     def post(self):
         self.response.out.write((self.request.get('first_name')))
 
@@ -187,8 +242,9 @@ app = webapp2.WSGIApplication([
     ('/url_fetch', UrlFetchHandler),
     ('/url_post', UrlPostHandler),
     ('/submit_form', SubmitHandler),
-    ('/gcs_list_object', GcsObjectList),
-    ('/gcs_insert_object', GcsObjectInsert),
-    ('/gcs_list_object_http', GcsObjectListHttp),
-    ('/gcs_insert_object_http', GcsObjectInsertHttp)
+    ('/gcs_list_object_urlfetch', GcsObjectListUrlFetch),
+    ('/gcs_insert_object_urlfetch', GcsObjectInsertUrlFetch),
+    ('/gcs_list_object_httplib2', GcsObjectListHttplib2),
+    ('/gcs_insert_object_httplib2', GcsObjectInsertHttplib2),
+    ('/gcs_insert_object_apiclient', GcsObjectInsertApiClient),
 ], debug=True)
