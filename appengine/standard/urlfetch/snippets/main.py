@@ -18,17 +18,39 @@ URLS on App Engine
 """
 
 import logging
+import os
 import urllib
+import json
 
 # [START urllib2-imports]
 import urllib2
 # [END urllib2-imports]
 import httplib2
 
+from google.appengine.api import app_identity
 # [START urlfetch-imports]
 from google.appengine.api import urlfetch
 # [END urlfetch-imports]
+from oauth2client import service_account
+from apiclient.discovery import build as discovery_build
+from apiclient.http import MediaFileUpload
+from apiclient.errors import HttpError
+
 import webapp2
+
+
+def GetAuthorizedHttpForGcsApi():
+    # Acquire credentials from service account key file 
+    service_account_keyfile = './appenginedefault-yaoliu.json'
+    scopes = (
+        'https://www.googleapis.com/auth/cloud-platform', 
+        'https://www.googleapis.com/auth/devstorage.read_write',
+    )
+    creds = service_account.ServiceAccountCredentials.from_json_keyfile_name(
+        service_account_keyfile,
+        scopes)    
+    
+    return creds.authorize(httplib2.Http())    
 
 
 class UrlLibFetchHandler(webapp2.RequestHandler):
@@ -49,6 +71,7 @@ class UrlFetchHandler(webapp2.RequestHandler):
     """ Demonstrates an HTTP query using urlfetch"""
 
     def get(self):
+
         # [START urlfetch-get]
         url = 'http://www.google.com/humans.txt'
         try:
@@ -123,12 +146,11 @@ class GcsObjectInsertApiClient(webapp2.RequestHandler):
 
 
         print '\nUpload complete!'
-        self.response.write(json.dumps(response, indent=2))       
+        print self.response.write(json.dumps(response, indent=2))           
 
 
 class SubmitHandler(webapp2.RequestHandler):
     """ Handler that receives UrlPostHandler POST request"""
-
     def post(self):
         self.response.out.write((self.request.get('first_name')))
 
