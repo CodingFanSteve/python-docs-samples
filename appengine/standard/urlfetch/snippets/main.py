@@ -23,6 +23,7 @@ import urllib
 # [START urllib2-imports]
 import urllib2
 # [END urllib2-imports]
+import httplib2
 
 # [START urlfetch-imports]
 from google.appengine.api import urlfetch
@@ -85,6 +86,46 @@ class UrlPostHandler(webapp2.RequestHandler):
         # [END urlfetch-post]
 
 
+class GcsObjectInsertApiClient(webapp2.RequestHandler):
+    def get(self):
+        http = GetAuthorizedHttpForGcsApi()
+        service = discovery_build('storage', 'v1', http=http)
+
+        print 'Building upload request...'
+        file_to_upload = './yao-test-gcs.txt'
+        media = MediaFileUpload(file_to_upload, resumable=True)
+        if not media.mimetype():
+            media = MediaFileUpload(filename, 'text/plain', resumable=True)        
+        bucket_name = os.environ.get('BUCKET_NAME', app_identity.get_default_gcs_bucket_name())
+        object_name = 'yao-test-gcs'
+        request = service.objects().insert(bucket=bucket_name, name=object_name, media_body=media)
+        
+        print 'Uploading file: %s to bucket: %s object: %s ' % (file_to_upload, bucket_name, object_name)
+        RETRYABLE_ERRORS = (httplib2.HttpLib2Error, IOError)
+
+
+        response = None
+        counter = 1
+        while response is None:
+            error = None
+            try:
+                print ('Upload round ', counter)
+                progress, response = request.next_chunk()
+                if progress:
+                    print('Upload %d%%' % (100 * progress.progress()))
+                counter += 1
+            except HttpError, err:
+                error = err
+                if err.resp.status < 500:
+                    raise
+            except RETRYABLE_ERRORS, err:
+                error = err
+
+
+        print '\nUpload complete!'
+        self.response.write(json.dumps(response, indent=2))       
+
+
 class SubmitHandler(webapp2.RequestHandler):
     """ Handler that receives UrlPostHandler POST request"""
 
@@ -96,5 +137,6 @@ app = webapp2.WSGIApplication([
     ('/', UrlLibFetchHandler),
     ('/url_fetch', UrlFetchHandler),
     ('/url_post', UrlPostHandler),
-    ('/submit_form', SubmitHandler)
+    ('/submit_form', SubmitHandler),
+    ('/gcs_insert_object_apiclient', GcsObjectInsertApiClient),
 ], debug=True)
